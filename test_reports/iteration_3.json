@@ -1,0 +1,42 @@
+{
+  "summary": "Re-test of the 4 backend fixes + 2 frontend fixes from iteration_2, plus light regression. Backend: extended /app/backend/tests/backend_test.py with a new TestIteration3Fixes class (7 tests) and made the two previously-failing bug tests collision-safe by giving each test its own product+purchased batch (_fresh_batch helper) instead of a shared seeded batch (xdist workers were mutating the same batch). Full suite now 70 passed / 0 failed / 0 skipped. Verified: over-return -> 400 with no stock inflation, partial returns accumulate correctly (1+1 ok, +2 rejected, +1 ok, final stock == original), cancel-after-return -> 400 and no double restock, return on cancelled invoice -> 400, cashier supplier payment -> 403 while cashier customer payment -> 200 (new_balance -10), purchase-return to wrong supplier -> 400 with batch qty untouched and correct-supplier return -> 200 (10 -> 9). Frontend (Playwright, 1920x1080): cashier login then direct navigation to /purchases, /products, /inventory, /suppliers, /settings, /expiry, /reports, /expenses ALL redirect to / and none render; allowed routes /, /pos, /sales, /customers, /udhar render normally; zero CRA 'Uncaught runtime errors' overlays and zero console errors on every page. Regression: owner POS cash sale created INV-2026-27-000107 (Rs.31, CGST/SGST/round-off correct), UI sales return succeeded with 'Sales return processed - stock & ledger updated' toast and appears on the Sales Returns tab; a second over-return from the UI is rejected with a readable error toast ('Return qty exceeds returnable qty for Dolo 650 Tablet (sold 1.0, already returned 1.0)') and NO crash overlay. Cashier POS sale also still creates an invoice.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Dashboard quick actions", "issue": "As cashier the dashboard still renders quick-action tiles for modules the role cannot access (New Purchase, Add Product, Purchase Import). Clicking them silently bounces back to / (dead buttons). Filter the quick-action grid by the same can(module) check used by Shell/sidebar.", "selector": "dashboard tiles 'New Purchase' / 'Add Product' / 'Purchase Import'", "priority": "MEDIUM"},
+      {"component": "Sales list balance column", "issue": "Cash sale with paid_amount > total shows Balance Rs.-969.00 in red (INV-2026-27-000107, total Rs.31, paid Rs.1000) as if it were outstanding. Overpayment should be clamped to 0 balance / shown as change returned.", "selector": "/sales row balance cell", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Purchases > New Purchase, Reports date range, Expiry", "issues": ["Still uses native <input type=\"date\"> pickers instead of the shadcn Calendar/Popover used elsewhere (carried over from iteration_2, not re-fixed)"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "MEDIUM: hide/disable dashboard quick actions the current role lacks permission for (cashier sees New Purchase / Add Product / Purchase Import which redirect to /).",
+    "LOW: clamp displayed sale balance at 0 for over-paid cash invoices (show change instead of negative outstanding).",
+    "LOW (carry-over): replace native date inputs in Purchases/Reports/Expiry with the shadcn Calendar component."
+  ],
+  "critical_code_review_comments": [
+    "All 4 backend fixes are correctly implemented: create_sales_return aggregates prior returned qty per sale_item_id, blocks returns on cancelled sales; cancel_sale blocks when sales_returns exist; record_payment gates customer payments on udhar/customers and supplier payments on the suppliers module; create_purchase_return validates batch.supplier_id == supplier_id with the documented purchase_no=='SEED' exemption.",
+    "index.js 'unhandledrejection' handler is a global band-aid: it stops the dev overlay but the ~14 api.get() calls without .catch() still leave pages in a permanent loading state on failure. Adding per-call error/loading state is still recommended.",
+    "server.py is still >1400 lines; stock mutations still read-then-$set without a conditional {'available_qty': {'$gte': qty}} guard (concurrency risk), and multi-document sale/purchase writes are non-transactional. Unchanged from iteration_2."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (70/70 pytest, incl. 7 new fix-verification tests)", "frontend": "100% of targeted fixes verified (route guard + no overlay + POS/return regression); 2 minor cosmetic issues found"},
+  "seed_data_creation": "Inserted one expired batch 'QAEXP1' (expiry 2025-01-31, qty 20, purchase_no SEED) directly in Mongo so the 3 previously-skipped expired-batch tests now run. Tests also create TEST_Iso_*/TEST_PRet_*/TEST_PayCust_* products, customers, purchases (batches ISOB1/TESTPR1) and several sales/returns. UI created INV-2026-27-000107 + SR-4C51588B and one cashier invoice.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Owner cristianoram123456@gmail.com / medistock123; Cashier cashier@medistock.demo / staff123 (from /app/memory/test_credentials.md). /app/auth_testing.md does not exist; app uses JWT Bearer in localStorage (no httpOnly cookies / brute-force lockout - not part of this app's design). Owner bcrypt hash verified $2b$ in iteration_2 and still passing.",
+  "context_for_next_testing_agent": "Run `cd /app/backend && python -m pytest tests/ -q` (xdist 2 workers) - 70 tests, all green. IMPORTANT: use the _fresh_batch(owner) helper (bottom of backend_test.py) for any test asserting exact batch quantities; _sale_ready_batch picks a shared seeded batch and produces flaky cross-worker failures. All iteration_2 defects are fixed and verified; only two cosmetic frontend items remain (cashier dashboard quick actions, negative balance on over-paid cash sale) plus the carry-over native date pickers.",
+  "rca_of_the_issue": "The 2 failures seen on my first run were test infrastructure flakiness, not product bugs: both bug tests selected the same seeded batch via _sale_ready_batch while running in parallel xdist workers, so concurrent sales/returns shifted available_qty between the before/after reads. Isolating each test to a freshly purchased batch made both pass deterministically, confirming the sales-return/cancel fixes are correct."
+}

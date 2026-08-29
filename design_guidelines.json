@@ -1,0 +1,124 @@
+{
+  "theme_archetype": "Swiss & High-Contrast (Archetype 4)",
+  "emotion_tone": "Authority, Clarity, Trust, Operational Speed",
+  "design_mode": "hybrid_fullstack_dashboard",
+  "colors": {
+    "primary": "#002FA7",
+    "primary_hover": "#00227A",
+    "background_light": "#FFFFFF",
+    "surface_light": "#F9FAFB",
+    "background_dark": "#0A0A0A",
+    "surface_dark": "#171717",
+    "text_primary": "#111827",
+    "text_secondary": "#4B5563",
+    "danger": "#EF4444",
+    "warning": "#F59E0B",
+    "success": "#10B981",
+    "border": "hsl(var(--border))",
+    "rules": [
+      "NO generic full-screen gradients. NO teal green or teal blue (#1B93A4).",
+      "Use Flat Solid surfaces. Do NOT use Glassmorphism for this data-heavy app to prevent visual refraction of data.",
+      "Use Tinted Greys, no pure #000000 (except for text/deep contrast) or pure #808080.",
+      "Never use complete transparent backgrounds in headers or overlays."
+    ]
+  },
+  "typography": {
+    "headings": {
+      "font_family": "Manrope, sans-serif",
+      "rules": [
+        "DO NOT use Inter, Space Grotesk, Roboto, Open Sans, or Lato for headings.",
+        "Use tight letter spacing (tracking-tight) for large headers.",
+        "Weight contrast: Use Radical weight contrast (e.g., ExtraBold vs Regular)."
+      ]
+    },
+    "body": {
+      "font_family": "'IBM Plex Sans', sans-serif",
+      "rules": [
+        "Optimized for numbers and dense data.",
+        "Left-align paragraphs, inputs, and dense content."
+      ]
+    },
+    "scales": {
+      "h1": "text-3xl sm:text-4xl",
+      "h2": "text-2xl sm:text-3xl",
+      "h3": "text-xl sm:text-2xl",
+      "h4": "text-lg sm:text-xl",
+      "body": "text-sm md:text-base",
+      "small_labels": "text-xs tracking-[0.2em] uppercase"
+    }
+  },
+  "layouts_and_grids": {
+    "dashboard_grid": {
+      "type": "High Density Grid",
+      "classes": "grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6",
+      "rules": [
+        "F-pattern hierarchy: Place the most critical KPI (e.g., Today's Sales) in the top-left.",
+        "Every pixel must be utilized. Use h-full on children to match neighbors.",
+        "Grid items MUST be direct children of grid containers."
+      ]
+    },
+    "navigation": {
+      "desktop": "Collapsible Left Sidebar. Avoid crowded top nav. Fixed positioning, z-50.",
+      "mobile": "Bottom Navigation (Dashboard, Billing, Inventory, Purchases, More). Fixed bottom, z-50."
+    },
+    "spacing": {
+      "philosophy": "Functional density. Use tight gaps for data (gap-2, gap-4) and generous padding for distinct sections (p-6, p-8).",
+      "containers": "Containers with borders MUST have internal padding to prevent text collision."
+    }
+  },
+  "components": {
+    "general_rules": [
+      "Use Shadcn UI components but heavily customize them.",
+      "Do NOT use generic HTML tags like <select> or <input type='date'>. Use Shadcn Dropdown, Select, and Calendar.",
+      "Cards: Cardless or max 8px border-radius (rounded-md or rounded-none). Flat backgrounds, 1px subtle border, no shadow by default.",
+      "Tables: Use dense data tables for POS/Inventory with sticky headers and hover states. Fast scannability is priority."
+    ],
+    "buttons": {
+      "style": "Sharp or slightly rounded (rounded-md). High contrast.",
+      "states": "ALWAYS explicitly set text color on hover (e.g., hover:bg-blue-800 hover:text-white). Focus states must have HIGHER contrast."
+    },
+    "icons": {
+      "library": "@phosphor-icons/react",
+      "installation": "yarn add @phosphor-icons/react",
+      "usage_rules": "Use for dense dashboards. Do NOT use AI emoji characters."
+    }
+  },
+  "motion_and_interactions": {
+    "philosophy": "Minimalist and snappy. Focus on micro-interactions for feedback.",
+    "rules": [
+      "NEVER use `transition: all`.",
+      "Use specific transitions: `transition: transform 0.15s ease, opacity 0.15s ease, background-color 0.15s ease`.",
+      "Hover states must be clearly visible (shift background hue, elevate slightly: -translate-y-[1px] shadow-sm)."
+    ]
+  },
+  "accessibility_and_testing": {
+    "contrast": "Text below 18px needs 4.5:1 ratio. Large text needs 3:1.",
+    "testing_attributes": "All interactive and key informational elements MUST include `data-testid` in kebab-case format (e.g., `data-testid=\"pos-checkout-button\"`)."
+  },
+  "media_and_images": {
+    "rules": [
+      "NEVER use placeholder URLs (via.placeholder.com, etc.).",
+      "Use icons or specific curated images for empty states."
+    ],
+    "image_urls": {
+      "pharmacist_portraits": [
+        "https://images.unsplash.com/photo-1580281657527-47f249e8f4df?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHwxfHxwaGFybWFjaXN0JTIwcG9ydHJhaXR8ZW58MHx8fHwxNzg4MDI3MjYzfDA&ixlib=rb-4.1.0&q=85",
+        "https://images.pexels.com/photos/14797861/pexels-photo-14797861.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+      ],
+      "medicine_inventory": [
+        "https://images.unsplash.com/photo-1633171036157-78d53387fdc0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2OTV8MHwxfHNlYXJjaHwyfHxtZWRpY2luZSUyMGJvdHRsZXMlMjBtaW5pbWFsfGVufDB8fHx8MTc4ODAyNzI2M3ww&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1544991875-5dc1b05f607d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2OTV8MHwxfHNlYXJjaHwzfHxtZWRpY2luZSUyMGJvdHRsZXMlMjBtaW5pbWFsfGVufDB8fHx8MTc4ODAyNzI2M3ww&ixlib=rb-4.1.0&q=85"
+      ]
+    }
+  },
+  "instructions_to_main_agent": [
+    "You are building a data-heavy ERP/POS system. Prioritize information clarity, fast keyboard navigation for billing, and functional density.",
+    "Set up Tailwind variables for the primary color (Klein Blue #002FA7), success (Green #10B981), and danger (Red #EF4444).",
+    "Install and import Phosphor icons for all navigational and action icons.",
+    "Build the dashboard using the Bento/High-Density grid layout provided. Top-left card MUST be the primary KPI.",
+    "Do not center-align dense text or dashboard containers. Always left-align.",
+    "Include an explicit 'data-testid' for every single button, link, and input.",
+    "Use Shadcn tables for Inventory and POS. Ensure there are active, hover, and disabled states.",
+    "Use sonner for notifications (`/app/src/components/ui/sonner.tsx`)."
+  ]
+}

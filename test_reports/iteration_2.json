@@ -1,0 +1,57 @@
+{
+  "summary": "Full-stack validation of MediStock Pro. Backend: 60-test pytest suite (auth/RBAC, dashboard, reports, products, inventory, POS sales incl. FEFO/idempotency/expired-batch, returns, purchases + CSV import, ledgers/payments, expenses, settings/staff) — 58 passed, 2 failed (genuine business-logic bugs in sales returns), 3 skipped (expired-batch fixtures consumed during UI testing; they passed on the first run). Frontend: end-to-end Playwright runs across Login, Dashboard KPIs+charts, POS cash sale (invoice INV-2026-27-000006 with CGST/SGST), POS credit sale (Udhar outstanding rose to Rs.31), Inventory (batch expand, stock adjust 37->36, Reorder tab), Products (add + edit), Purchases (new purchase PUR-xxxx -> batch UIB101 visible in Inventory) and CSV Import (Load sample -> preview Total 2/Matched 1/New 1/Errors 0 -> commit 'Imported 2 items'), Sales & Returns (invoice view, SR-xxxx return + tabs), Expiry (all 5 buckets, purchase-return of expired batch), Customers (add, ledger, payment 31->26), Suppliers (add, payment), Udhar Khata (collect), Expenses (777 added), Reports (Sales/GST-HSN/Stock Valuation + CSV downloads), Settings (profile save, staff add, audit log), RBAC cashier sidebar, plus mobile 390px layout (no overflow, bottom nav filtered).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/sales-returns", "issue": "Cumulative returned qty is not tracked. Validation only compares the requested qty against the original sale-item qty, so the SAME sale item can be fully returned repeatedly - each time restocking the batch and refunding again (reproduced: 2 units sold, returned 2 twice, second call returned 200 with refund Rs.235.2). Fix: sum existing sales_return items for the sale_item_id and reject qty > (sold - already_returned).", "priority": "CRITICAL"},
+      {"endpoint": "POST /api/sales/{id}/cancel", "issue": "Cancel does not account for prior returns and does not block cancelling a returned/partially-returned sale, so stock is restored twice (reproduced: batch 15 -> 17 after full return + cancel). Also allows cancel after refund was already issued. Fix: block cancel when returns exist (or subtract returned qty) and mark cancelled sales non-returnable.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/purchase-returns", "issue": "Does not validate that the batch was actually purchased from the selected supplier - any batch can be returned to any supplier, creating an incorrect supplier debit."},
+      {"endpoint": "POST /api/payments", "issue": "Not gated by require_module - a cashier (no 'customers' write intent beyond udhar) or any authenticated staff can post customer AND supplier payments; supplier payments should require the 'suppliers' module."},
+      {"endpoint": "GET /api/products, GET /api/suppliers, GET /api/customers", "issue": "Only require authentication (no module gate). Acceptable for POS, but it means a cashier can enumerate the full product/supplier master; confirm this is intended."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "App.js Protected route wrapper", "issue": "No permission-based route guard. Logged in as cashier@medistock.demo, navigating directly to /purchases, /products, /inventory, /settings renders the full restricted page (New Purchase form with Save Purchase, CSV Import, Business Profile/Staff tabs). Only the sidebar/bottom-nav is filtered. Guard routes with the permissions from /api/auth/me and redirect to /.", "selector": "url /purchases as cashier", "priority": "HIGH"},
+      {"component": "Inventory.jsx / Dashboard.jsx / Reports.jsx / Purchases.jsx / Sales.jsx / Expiry.jsx / POS.jsx", "issue": "~14 api.get() calls have no .catch() handler. As cashier on /inventory this produced a CRA 'Uncaught runtime errors: Request failed with status code 403' full-screen overlay plus a permanent loading spinner. Every fetch needs loading/error state.", "selector": "[data-testid=\"inv-search\"] page", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Purchases > New Purchase (pur-exp-<i>), Reports date range (From/To), Expiry", "issues": ["Uses native <input type=\"date\"> browser pickers instead of the shadcn Calendar/Popover component used elsewhere - inconsistent with the design system"]},
+      {"screen": "General", "issues": ["No blocking contrast/spacing/alignment problems found on desktop 1920x1080 or mobile 390x844; no horizontal overflow; sidebar, KPI cards, tables and dialogs render correctly"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/cleanup_test_data.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "CRITICAL: track cumulative returned qty in POST /api/sales-returns so a sale item cannot be returned more than it was sold (currently unlimited refunds + stock inflation).",
+    "HIGH: make POST /api/sales/{id}/cancel return-aware - reject cancel when returns exist and reject returns on cancelled sales.",
+    "HIGH: add permission-based route guarding in App.js/Protected so restricted pages are not renderable by roles lacking the module (cashier currently sees /purchases, /products, /inventory, /settings).",
+    "HIGH: add .catch()/error state to all api.get() calls (Inventory, Dashboard, Reports, Purchases, Sales, Expiry, POS) - a 403/500 currently crashes the page with a runtime-error overlay.",
+    "MINOR: validate batch-supplier relationship in POST /api/purchase-returns; gate POST /api/payments by module (supplier payments) as appropriate."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1461 lines - split into routers (sales, purchases, inventory, parties, reports, settings) for maintainability.",
+    "Stock mutations use read-then-$inc without a guard on available_qty; under concurrency (two POS terminals) a batch can go negative. Use a conditional update ({'available_qty': {'$gte': qty}}) and check modified_count.",
+    "Sales/purchase writes are multi-document without transactions; a mid-flow failure leaves partial stock/ledger state. Consider Mongo transactions or compensating logic.",
+    "Money is stored as floats; ledger balances already show accumulated rounding risk - consider integer paise or Decimal128 for financial fields.",
+    "Owner bcrypt hash verified as $2b$ format; JWT auth, 401/403 handling and _id exclusion are correct across all tested endpoints."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/cleanup_test_data.py"
+  ],
+  "success_rate": {"backend": "97% (58/60 passed, 2 genuine bugs, 3 skipped)", "frontend": "94% (all 15 UI flows functional; 2 HIGH defects: missing route guard + unhandled API error overlay)"},
+  "seed_data_creation": "Created via API/UI during testing: products 'QA Test Med UI' + TEST_* (TEST_/QA zero-stock products deactivated afterwards by cleanup_test_data.py), customers 'QA UI Customer'/TEST_Cust_*, supplier 'QA UI Supplier', staff qa_staff_*/test_staff_* (one deactivated), several sales/returns/purchases (incl. batches TESTB1, TESTADJ, UIB101, CSV sample rows) and expense Rs.777. Business mobile field set to 9876500001.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Owner cristianoram123456@gmail.com / medistock123; Cashier cashier@medistock.demo / staff123 (from /app/memory/test_credentials.md). Note: /app/auth_testing.md does not exist; app uses JWT Bearer in localStorage (no httpOnly cookies, no brute-force lockout implemented - not part of this app's spec).",
+  "context_for_next_testing_agent": "Run `cd /app/backend && python -m pytest tests/ -q`. The 2 remaining failures (test_repeated_returns_cannot_exceed_sold_qty, test_cancel_after_return_should_not_double_restock) are the real bugs to re-verify after the fix. 3 tests skip because the seeded EXPIRED batch was consumed by my UI purchase-return test; to re-test 'expired batch cannot be sold' / purchase-return-of-expired, insert a batch with a past expiry_date directly in Mongo (seed is idempotent and will not recreate it). Tests run under xdist (2 workers) - avoid assertions on shared seeded batch quantities; create a dedicated product/batch per test as done in test_adjust_stock_and_persist. Verified working and no need to re-test unless code changes: FEFO batch pick, idempotency_key dedupe, expired-batch 400, purchase->stock increase, CSV import, all ledgers, RBAC API 403s, all UI CRUD flows.",
+  "rca_of_the_issue": "sales-returns validation compares only the incoming qty against the original sale-item qty and never aggregates previously returned quantities; likewise /sales/{id}/cancel blindly re-adds every sale item's qty regardless of returns/status. Both paths therefore inflate batch available_qty and issue duplicate refunds. On the frontend, App.js Protected only checks user+business (not the permissions array from /api/auth/me), so restricted pages mount for any role and their unguarded api.get() promises reject with 403, surfacing a CRA runtime-error overlay."
+}
