@@ -13,7 +13,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "../components/ui/select";
 import { toast } from "sonner";
-import { Plus, Trash2, Upload, FileDown, Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Plus, Trash2, Upload, FileDown, Loader2, CheckCircle2, XCircle, Camera, FileText, ScanLine } from "lucide-react";
 
 export default function Purchases() {
   const [params] = useSearchParams();
@@ -24,10 +24,12 @@ export default function Purchases() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="new" data-testid="tab-new-purchase">New Purchase</TabsTrigger>
+          <TabsTrigger value="scan" data-testid="tab-scan-bill">Scan Bill</TabsTrigger>
           <TabsTrigger value="import" data-testid="tab-import">CSV Import</TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-purchase-history">History</TabsTrigger>
         </TabsList>
         <TabsContent value="new"><NewPurchase onDone={() => setTab("history")} /></TabsContent>
+        <TabsContent value="scan"><ScanBill onDone={() => setTab("history")} /></TabsContent>
         <TabsContent value="import"><CsvImport onDone={() => setTab("history")} /></TabsContent>
         <TabsContent value="history"><History /></TabsContent>
       </Tabs>
@@ -176,6 +178,127 @@ function NewPurchase({ onDone }) {
 const SAMPLE_CSV = `Product,Batch,Expiry,Qty,Free Qty,MRP,Rate,Discount,GST,HSN,Manufacturer
 Dolo 650 Tablet,B5001,2027-08-31,100,10,30.50,22,5,12,3004,Micro Labs
 New Cough Syrup,C2201,2027-03-31,50,0,85,60,0,12,3004,ABC Pharma`;
+
+function ScanBill({ onDone }) {
+  const [suppliers, setSuppliers] = useState([]);
+  const [supplierId, setSupplierId] = useState("");
+  const [invNo, setInvNo] = useState("");
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+
+  useEffect(() => { api.get("/suppliers").then((r) => setSuppliers(r.data)); }, []);
+
+  const upload = async () => {
+    if (!supplierId) return toast.error("Select a supplier first");
+    if (!file) return toast.error("Choose a PDF or photo of the bill");
+    setLoading(true);
+    setResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("supplier_id", supplierId);
+      fd.append("supplier_invoice_no", invNo);
+      const { data } = await api.post("/purchases/import/file", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setResult(data);
+      toast.success(`Purchase ${data.purchase.purchase_no} created from bill · ${data.line_items} items`);
+    } catch (e) {
+      toast.error(apiError(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="bg-accent text-accent-foreground rounded-lg p-4 text-sm flex gap-2">
+        <ScanLine className="h-5 w-5 shrink-0 mt-0.5" />
+        <div>
+          <div className="font-semibold mb-0.5">Scan a supplier bill (OCR)</div>
+          Upload a <b>PDF</b> or snap a <b>photo</b> of the bill. Text is read on-device (OCR, no AI),
+          line items are extracted and the purchase is <b>created automatically</b>. Since scans vary,
+          always open the created purchase in History and verify quantities & rates.
+        </div>
+      </div>
+
+      <div className="bg-background border rounded-lg p-4 space-y-3">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs">Supplier *</Label>
+            <Select value={supplierId} onValueChange={setSupplierId}>
+              <SelectTrigger data-testid="scan-supplier" className="mt-1"><SelectValue placeholder="Select supplier" /></SelectTrigger>
+              <SelectContent>{suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Supplier Invoice No.</Label>
+            <Input data-testid="scan-invno" value={invNo} onChange={(e) => setInvNo(e.target.value)} className="mt-1" />
+          </div>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-3">
+          <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-lg p-6 cursor-pointer hover:border-primary transition-colors">
+            <input type="file" accept="application/pdf,image/*" className="hidden" data-testid="scan-file-upload"
+                   onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            <FileText className="h-7 w-7 text-primary" />
+            <span className="text-sm font-medium">Upload PDF / Image</span>
+            <span className="text-xs text-muted-foreground">from your device</span>
+          </label>
+          <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-lg p-6 cursor-pointer hover:border-primary transition-colors">
+            <input type="file" accept="image/*" capture="environment" className="hidden" data-testid="scan-file-camera"
+                   onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            <Camera className="h-7 w-7 text-primary" />
+            <span className="text-sm font-medium">Scan with Camera</span>
+            <span className="text-xs text-muted-foreground">take a photo of the bill</span>
+          </label>
+        </div>
+
+        {file && (
+          <div className="text-sm bg-secondary/60 rounded-md px-3 py-2 flex items-center justify-between" data-testid="scan-file-name">
+            <span className="truncate">📎 {file.name}</span>
+            <button onClick={() => setFile(null)} className="text-muted-foreground hover:text-red-600 text-xs">Remove</button>
+          </div>
+        )}
+
+        <Button onClick={upload} disabled={loading} data-testid="scan-upload">
+          {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ScanLine className="h-4 w-4 mr-2" />}
+          Read Bill & Create Purchase
+        </Button>
+      </div>
+
+      {result && (
+        <div className="bg-background border rounded-lg p-4 space-y-3" data-testid="scan-result">
+          <div className="flex flex-wrap gap-3 text-sm items-center">
+            <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+            <span className="font-medium">Created {result.purchase.purchase_no}</span>
+            <Badge variant="secondary">Total {inr(result.purchase.grand_total)}</Badge>
+            <Badge className="bg-emerald-600">Matched: {result.matched}</Badge>
+            <Badge className="bg-amber-500">New: {result.new_products}</Badge>
+          </div>
+          <div className="text-xs text-muted-foreground">Extracted line items (verify against the physical bill):</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-secondary/60 uppercase text-muted-foreground">
+                <tr><th className="text-left p-2">Product</th><th className="text-left p-2">Batch</th><th className="text-left p-2">Expiry</th><th className="text-right p-2">Qty</th><th className="text-right p-2">MRP</th><th className="text-right p-2">Rate</th></tr>
+              </thead>
+              <tbody>
+                {result.parsed_rows.map((r, i) => (
+                  <tr key={i} className="border-t">
+                    <td className="p-2 font-medium">{r.product}</td><td className="p-2">{r.batch}</td>
+                    <td className="p-2">{r.expiry}</td><td className="p-2 text-right tabular">{r.qty}</td>
+                    <td className="p-2 text-right tabular">{r.mrp}</td><td className="p-2 text-right tabular">{r.rate}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CsvImport({ onDone }) {
   const [csv, setCsv] = useState("");

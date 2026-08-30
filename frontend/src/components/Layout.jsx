@@ -21,6 +21,7 @@ const NAV = [
   { to: "/udhar", label: "Udhar Khata", icon: BookText, mod: "udhar" },
   { to: "/expenses", label: "Expenses", icon: Receipt, mod: "expenses" },
   { to: "/reports", label: "Reports", icon: BarChart3, mod: "reports" },
+  { to: "/admin", label: "Admin Panel", icon: ShieldCheck, mod: "settings" },
   { to: "/settings", label: "Settings", icon: SettingsIcon, mod: "settings" },
 ];
 

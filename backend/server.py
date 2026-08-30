@@ -11,7 +11,7 @@ import csv
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Dict, Any
 
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Query, UploadFile, File, Form
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
@@ -1196,6 +1196,62 @@ async def import_commit(body: dict, user: dict = Depends(require_module("import"
         items=items, payment_method="credit"), user)
     return {"imported": len(items), "purchase": purchase}
 
+@api.post("/purchases/import/file")
+async def import_from_file(
+    file: UploadFile = File(...),
+    supplier_id: str = Form(...),
+    supplier_invoice_no: str = Form(""),
+    user: dict = Depends(require_module("import")),
+):
+    """OCR/text-extract a PDF or photo of a supplier bill and auto-create the purchase."""
+    import billparse
+    bid = user["business_id"]
+    supplier = await db.suppliers.find_one({"id": supplier_id, "business_id": bid})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier required")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
+    text = billparse.extract_text(file.filename or "bill", content)
+    parsed = billparse.parse_rows(text)
+    if not parsed:
+        raise HTTPException(status_code=422,
+            detail="Could not read any line items from this bill. The scan may be unclear — "
+                   "try a sharper photo, a clearer PDF, or use CSV import.")
+    # match products by name
+    products = await db.products.find({"business_id": bid}).to_list(20000)
+    pname = {p["name"].strip().lower(): p for p in products}
+    items, new_count, matched = [], 0, 0
+    for r in parsed:
+        m = pname.get(r["product"].strip().lower())
+        pid = m["id"] if m else None
+        if pid:
+            matched += 1
+        else:
+            new_count += 1
+            np = {"id": uid(), "business_id": bid, "name": r["product"], "brand": r["product"],
+                  "manufacturer": r.get("manufacturer", ""), "category": "Medicine",
+                  "hsn": r.get("hsn", ""), "gst_rate": r.get("gst", 0), "mrp": r.get("mrp", 0),
+                  "purchase_rate": r.get("rate", 0), "selling_rate": r.get("mrp", 0),
+                  "unit": "pcs", "pack_size": "1", "min_stock": 10, "active": True,
+                  "prescription_required": False, "created_at": now_iso()}
+            for f in PRODUCT_FIELDS:
+                np.setdefault(f, "" if f not in ("gst_rate", "mrp", "purchase_rate",
+                              "selling_rate", "min_stock", "reorder_level") else 0)
+            await db.products.insert_one(np)
+            pid = np["id"]
+        items.append(PurchaseItemIn(
+            product_id=pid, batch_number=r["batch"], expiry_date=r["expiry"], qty=r["qty"],
+            free_qty=r.get("free_qty", 0), mrp=r["mrp"], purchase_rate=r["rate"],
+            discount_pct=r.get("discount", 0), gst_rate=r.get("gst", 0),
+            selling_price=r.get("mrp", 0)))
+    purchase = await create_purchase(PurchaseIn(
+        supplier_id=supplier_id, supplier_invoice_no=supplier_invoice_no,
+        items=items, payment_method="credit"), user)
+    await audit(bid, user, "purchase_ocr_import", purchase["purchase_no"], new=len(items))
+    return {"source": file.filename, "line_items": len(items), "matched": matched,
+            "new_products": new_count, "parsed_rows": parsed, "purchase": purchase}
+
 # ---------------------------------------------------------------------------
 # Purchase Return
 # ---------------------------------------------------------------------------
@@ -1454,6 +1510,70 @@ async def export_collection(collection: str, user: dict = Depends(require_module
 @api.get("/")
 async def root():
     return {"service": "MediStock Pro API", "status": "ok"}
+
+# ---------------------------------------------------------------------------
+# Admin control panel  (owner + admin)
+# ---------------------------------------------------------------------------
+def require_owner(user: dict = Depends(get_current_user)):
+    if user.get("role") != "owner":
+        raise HTTPException(status_code=403, detail="Owner access required")
+    return user
+
+@api.get("/admin/overview")
+async def admin_overview(user: dict = Depends(require_module("settings"))):
+    bid = user["business_id"]
+    cols = ["products", "product_batches", "customers", "suppliers", "sales",
+            "purchases", "sales_returns", "purchase_returns", "payments",
+            "expenses", "stock_movements", "audit_logs"]
+    counts = {}
+    for c in cols:
+        counts[c] = await db[c].count_documents({"business_id": bid})
+    staff = await db.users.count_documents({"business_id": bid})
+    roles = {}
+    async for u in db.users.find({"business_id": bid}):
+        roles[u["role"]] = roles.get(u["role"], 0) + 1
+    return {"counts": counts, "staff": staff, "roles": roles,
+            "permissions_matrix": PERMISSIONS}
+
+@api.post("/admin/clear-transactions")
+async def clear_transactions(user: dict = Depends(require_owner)):
+    """Danger zone: wipe all transactional data, keep masters. Resets balances."""
+    bid = user["business_id"]
+    for c in ["sales", "sale_items", "purchases", "purchase_items", "sales_returns",
+              "purchase_returns", "stock_movements", "customer_ledger",
+              "supplier_ledger", "payments", "expenses", "audit_logs"]:
+        await db[c].delete_many({"business_id": bid})
+    # reset party balances to opening and re-post opening ledger entries
+    async for cst in db.customers.find({"business_id": bid}):
+        ob = cst.get("opening_balance", 0)
+        await db.customers.update_one({"id": cst["id"]}, {"$set": {"balance": ob}})
+        if ob:
+            await db.customer_ledger.insert_one({
+                "id": uid(), "business_id": bid, "customer_id": cst["id"],
+                "date": today_str(), "reference": "OPENING", "description": "Opening Balance",
+                "debit": ob, "credit": 0, "balance": ob, "created_at": now_iso()})
+    async for sup in db.suppliers.find({"business_id": bid}):
+        ob = sup.get("opening_balance", 0)
+        await db.suppliers.update_one({"id": sup["id"]}, {"$set": {"balance": ob}})
+        if ob:
+            await db.supplier_ledger.insert_one({
+                "id": uid(), "business_id": bid, "supplier_id": sup["id"],
+                "date": today_str(), "reference": "OPENING", "description": "Opening Balance",
+                "debit": 0, "credit": ob, "balance": ob, "created_at": now_iso()})
+    await db.businesses.update_one({"id": bid}, {"$set": {"invoice_counter": 0}})
+    return {"ok": True, "message": "Transactional data cleared. Masters & opening balances kept."}
+
+@api.post("/admin/products/deactivate-zero-stock")
+async def deactivate_zero_stock(user: dict = Depends(require_module("settings"))):
+    bid = user["business_id"]
+    prods = await db.products.find({"business_id": bid, "active": True}).to_list(50000)
+    n = 0
+    for p in prods:
+        st = await product_stock(p["id"])
+        if st["stock"] <= 0:
+            await db.products.update_one({"id": p["id"]}, {"$set": {"active": False}})
+            n += 1
+    return {"deactivated": n}
 
 # ---------------------------------------------------------------------------
 # App wiring

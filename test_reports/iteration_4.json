@@ -1,0 +1,56 @@
+{
+  "summary": "Iteration 4 focused on the two NEW features: Purchases > Scan Bill (OCR auto-purchase) and the Admin Control Panel, plus RBAC. Backend: added /app/backend/tests/test_admin_scan.py (19 tests) covering /api/admin/overview (owner 200, admin 200, cashier 403, anon 401), /api/admin/clear-transactions RBAC (admin/cashier 403 — destructive owner call intentionally NOT executed), /api/admin/products/deactivate-zero-stock (count matches, idempotent, demo data restored), /api/products/import + /api/export/*, and /api/purchases/import/file OCR flow (generated PNG bill -> purchase created, batches + stock verified, invalid supplier 404, missing file 422, unreadable scan 422). Full suite: 86 passed / 3 failed — the 3 failures are intentional security assertions exposing a real privilege-escalation hole in PUT /api/staff/{id}. Frontend (Playwright, owner/admin/cashier): sidebar 'Admin Panel' sits between Reports and Settings; Scan Bill validations (no supplier / no file toasts) work; uploading a generated bill image created PUR-6F60407E (2 line items), which appeared in History and increased Inventory stock; all 5 admin tabs work (matrix, add staff, inline role change, active toggle, business/tax save + persistence after reload, med sample->import 'Imported 2 products', products CSV download, deactivate zero-stock, clear-data confirm dialog opened and cancelled WITHOUT executing); admin sees all tabs with dz-clear DISABLED + 'Owner access required'; cashier has no Admin Panel entry and /admin redirects to / with no crash. Zero console errors in all runs.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "PUT /api/staff/{id}", "issue": "No role validation and no target protection: an 'admin' can PUT {\"role\":\"owner\"} on their own user and instantly become owner (verified: role changed, status 200, reverted by test) — which also unlocks the owner-only Danger Zone /admin/clear-transactions. Any arbitrary string is accepted as role (e.g. 'not-a-role'), and an admin can PUT on the OWNER's record (name/password/active) — i.e. admin can lock the owner out. POST /api/staff correctly rejects role='owner'; PUT does not.", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/purchases/import/file", "issue": "OCR misreads silently create permanent junk products in the medicine master (found pre-existing '\"Dole8S0 Tablet DL9001', \"'Dolo650 Tablet DL9001\", 'UIMEDAlpha', 'TEST.OcrNew Tab'). No dedupe/fuzzy match/review step; each unclear scan pollutes the catalog and creates a batch with wrong MRP/qty. Suggest returning a draft for confirmation (or fuzzy name match + 'review new products' step)."},
+      {"endpoint": "GET /api/products", "issue": "Returns inactive products too (no active filter/param), so 'Deactivate Zero-Stock Products' has no visible effect in Products/Admin lists even though the DB flag flips — contradicts the UI copy 'hidden from active lists'."},
+      {"endpoint": "POST /api/products/import", "issue": "No dedupe on name — re-importing the same CSV creates duplicate products (sample import run twice creates 2 more). No per-row validation errors returned (rows without name are silently skipped, count only)."},
+      {"endpoint": "POST /api/auth/login", "issue": "No brute-force lockout/rate limit: 6 consecutive wrong passwords all return 401 and the next valid login succeeds (playbook expects lockout after 5 fails)."},
+      {"endpoint": "/api/staff", "issue": "No DELETE endpoint — test/QA staff can only be deactivated; 15 staff rows have accumulated in the demo business (I deactivated 10 test accounts)."},
+      {"endpoint": "CORS", "issue": "allow_origins=['*'] with allow_credentials=False. Works because auth is Bearer/localStorage, but deviates from the auth playbook (explicit origins + httpOnly cookies); tokens in localStorage are XSS-readable."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AdminPortal > StaffRoles table", "issue": "Table wrapper uses 'overflow-hidden' with no 'overflow-x-auto'; on 390px mobile the Role dropdown (role-<id>) and Active switch columns are clipped off-screen and unreachable (page scrollWidth == clientWidth, so no horizontal scroll).", "selector": "[data-testid^=\"admin-staff-\"]", "priority": "MEDIUM"},
+      {"component": "Layout nav", "issue": "Duplicate data-testid: both 'Admin Panel' and 'Settings' links render data-testid=\"nav-settings\" (count=2), breaking testid-based selection. Use nav-admin for the Admin Panel entry.", "selector": "[data-testid=\"nav-settings\"]", "priority": "MEDIUM"},
+      {"component": "AdminPortal > Overview", "issue": "Backend returns 12 counts but only 8 cards are rendered (sales_returns, purchase_returns, expenses, stock_movements, audit_logs are dropped); only ov-products has a data-testid, the other 7 StatCards have none.", "selector": "[data-testid=\"ov-products\"]", "priority": "LOW"},
+      {"component": "Purchases > ScanBill result", "issue": "Result panel tells the user to 'open the created purchase in History and verify' but gives no link/CTA to that purchase, and does not flag which rows created NEW products (only an aggregate 'New: 2' badge).", "selector": "[data-testid=\"scan-result\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin Panel / Scan Bill (desktop 1920 + mobile 390)", "issues": ["No horizontal overflow, contrast and spacing fine; danger-zone amber/red panels read clearly", "Danger Zone confirm dialog says 'Type nothing — just confirm below' for an irreversible wipe; consider requiring typed confirmation for a destructive action"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_scan.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/new_features.xml"
+  ],
+  "action_items": [
+    "CRITICAL: validate role in PUT /api/staff/{id} (must be in PERMISSIONS and != 'owner'), block non-owners from modifying the owner record, and block self-role changes.",
+    "Give the Admin Panel nav item its own data-testid (nav-admin) instead of duplicating nav-settings.",
+    "Wrap the Staff & Roles table in overflow-x-auto so Role/Active controls are reachable on mobile.",
+    "Add an active/status filter to GET /api/products (or filter inactive by default) so deactivate-zero-stock has a visible effect.",
+    "Reduce OCR master pollution: fuzzy-match names, dedupe on import, and/or make new-product creation an explicit confirm step; also dedupe POST /api/products/import.",
+    "Consider login rate-limiting/lockout (5 fails) per the auth playbook."
+  ],
+  "critical_code_review_comments": [
+    "PUT /api/staff/{sid} blindly $sets name/role/active/password from the raw body with no Pydantic model and no role whitelist -> privilege escalation and owner lockout.",
+    "billparse.parse_rows is purely positional; OCR digit merges (e.g. '08/2027 10 120' -> '082027 12080') silently drop whole lines, and mis-parsed rows are committed as real stock with no draft/confirm step.",
+    "server.py is 1606 lines — split into routers (auth, products, purchases, admin) per the 700-line guideline.",
+    "AdminPortal.jsx Overview/StaffRoles fetches have no .catch (Overview api.get('/admin/overview') without error handling would spin on Loading forever if it 403s/500s)."
+  ],
+  "updated_files": ["/app/backend/tests/test_admin_scan.py"],
+  "success_rate": {"backend": "84% (16/19 new-feature tests pass; 86/89 total, 3 failures are the staff-role security holes)", "frontend": "100% of new-feature flows passed (Scan Bill, all 5 admin tabs, RBAC for owner/admin/cashier)"},
+  "seed_data_creation": "Created (and then deactivated/cleaned) TEST_*/TESTMED/UIMED products, one QA staff member (qa_staff_*@medistock.demo, left inactive) and one OCR purchase PUR-6F60407E from the generated bill image. Reactivated all demo products that deactivate-zero-stock switched off. Bill fixture image at /tmp/test_bill.png.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "owner cristianoram123456@gmail.com/medistock123, admin@medistock.demo/staff123, cashier@medistock.demo/staff123 (all valid)",
+  "context_for_next_testing_agent": "New-feature suite lives in /app/backend/tests/test_admin_scan.py; _bill_png(rows) there generates OCR-friendly bill images — IMPORTANT: columns must be separated by 3+ spaces or tesseract merges digits and the parser returns 0 rows (422). The 3 failing tests in TestStaffRoleSecurity are intentional and should PASS once PUT /api/staff/{id} is hardened; they self-revert the role change. Never call POST /api/admin/clear-transactions as owner (wipes demo data) — only RBAC-negative calls are tested. Owner Admin Panel UI + Scan Bill UI + cashier/admin RBAC all verified in iteration 4; re-verify only the fixes.",
+  "rca_of_the_issue": "PUT /api/staff/{sid} accepts an untyped dict and copies name/role/active straight into $set. The dependency is require_module('staff'), which admins hold, so any admin can set their own role to 'owner' (verified 200 + role persisted) — bypassing require_owner on /admin/clear-transactions — or modify/deactivate the owner. Fix: Pydantic StaffUpdate with role Literal['admin','pharmacist','cashier','inventory'], reject sid whose target role is 'owner' unless requester is owner, and reject requester==target role changes."
+}

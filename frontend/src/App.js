@@ -20,6 +20,7 @@ import UdharKhata from "@/pages/UdharKhata";
 import Expenses from "@/pages/Expenses";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
+import AdminPortal from "@/pages/AdminPortal";
 
 function Protected({ children }) {
   const { loading, user, business } = useAuth();
@@ -59,6 +60,7 @@ function App() {
             <Route path="/udhar" element={<Shell module="udhar"><UdharKhata /></Shell>} />
             <Route path="/expenses" element={<Shell module="expenses"><Expenses /></Shell>} />
             <Route path="/reports" element={<Shell module="reports"><Reports /></Shell>} />
+            <Route path="/admin" element={<Shell module="settings"><AdminPortal /></Shell>} />
             <Route path="/settings" element={<Shell module="settings"><Settings /></Shell>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
